@@ -144,3 +144,18 @@ class OutputContractService(BaseModuleService):
         if not rows:
             return 0.0
         return sum(1 for r in rows if r.get("status") == "已通过") / len(rows)
+
+    def review_unit_provenance(self, contract_no: str,
+                               batch_no: str = "") -> tuple[bool, str, dict[str, Any] | None]:
+        """接收契约时复核实际取用的系数出处：每个约定列都要有已确认回执可查。"""
+        from app.services import service_for
+
+        share = service_for("unit_share")
+        contract = self._find(contract_no)
+        if share is None or contract is None:
+            return False, f"契约 {contract_no} 不存在", None
+        batch = batch_no or str(contract.get("关联批次") or "")
+        check = share.check_contract_provenance(contract_no, batch)
+        contract["系数出处复核"] = "通过" if check["ok"] else ";".join(check["failures"])
+        contract["系数出处复核批次"] = batch
+        return bool(check["ok"]), str(check["message"]), dict(contract)

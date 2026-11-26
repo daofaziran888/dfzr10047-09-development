@@ -63,6 +63,7 @@ npm run dev
 | 嵌套展平 | `nested_flatten` | 展平路径 | 展平编号、关联模板、原始路径 |
 | 取值转型 | `value_cast` | 转型规则 | 转型编号、目标类型、来源类型 |
 | 单位归一 | `unit_normalize` | 归一系数 | 归一编号、字段名称、原始单位 |
+| 系数共享 | `unit_share` | 共享授权 | 授权编号、字段名称、授予方渠道、受让方渠道 |
 | 输出契约 | `output_contract` | 契约条目 | 契约编号、关联批次、输出列集合 |
 | 结果投递 | `result_deliver` | 投递记录 | 投递记录编号、关联契约、目标位置 |
 | 解析水位 | `parse_watermark` | 水位读数 | 水位编号、来源渠道、已解析至位点 |
@@ -83,3 +84,26 @@ npm run dev
 
 领域：数据工程
 子方向：数据采集、爬虫与RPA
+
+## 系数共享授权
+
+单位归一的系数默认只对所属来源渠道生效。需要跨渠道复用时，由来源负责人走授权流程：
+
+- **签发凭据**：`POST /api/unit-share/grants` 由服务端把渠道范围、受让渠道、系数和关联批次
+  写入载荷并用 HMAC 签名，返回 `ugs1.<载荷>.<签名>` 令牌；令牌被改动或与授权记录对不上时校验失败。
+- **撤回**：`POST /api/unit-share/grants/{授权编号}/revoke` 立即让共享系数失效，
+  但**已确认字段保留当次原单位、因子和来源**，不随授权变更刷新成新值。
+- **资格核对**：`GET /api/unit-share/eligibility?channel=&field=&batch=` 分别返回
+  「在途申请」与「下一笔新申请」的结论：在途可按已确认快照或撤回前授权继续核对，
+  新申请在撤回后改用自有规则；没有资格的渠道会拿到授权归属说明。
+- **取值转型**：`POST /api/unit-share/cast` 按资格换算并落一条转型回执；同一字段重复提交
+  只返回原确认，不再新增回执；未授权的新批次、越权渠道一律拒绝并记录归属与被拒值。
+- **来源规则冲突**：`POST /api/unit-share/own-factor` 登记自有系数；同一批既有在途共享系数
+  又有自有系数时登记冲突（`GET /api/unit-share/conflicts`），用
+  `POST /api/unit-share/conflicts/{冲突编号}/resolve` 裁决。
+- **回执与复核**：`GET /api/unit-share/receipts` 回查历史转型回执（含拒绝归属与被拒值），
+  `GET /api/unit-share/provenance` / `GET /api/unit-share/contract-check` 复核归一结果实际
+  取用的系数出处，供输出契约接收时对账。
+
+前端把 `unit_share` 从通用表格页拆成两个页面：`/unit_share`（授权清单、资格核对称、凭据校验）
+与 `/unit_share/cast`（转型表单、冲突裁决、历史回执）。

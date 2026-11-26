@@ -28,6 +28,7 @@ from app.pipeline.structure_sniffer import StructureSniffer
 from app.pipeline.transform_stage import TransformStage
 from app.pipeline.template_version import TemplateVersionManager
 from app.pipeline.review_metric import ReviewMetricEngine
+from app.services import service_for
 from app.store import store
 
 
@@ -306,7 +307,13 @@ class ParsePipelineOrchestrator:
         documents: list[dict[str, Any]], cast_rules: list[Any],
         contract_id: str, contract_columns: list[str], mandatory: list[str],
         min_rows: int, check_time: str,
+        unit_fields: list[str] | None = None,
     ) -> dict[str, Any]:
+        """展平→转型→单位归一→输出契约。
+
+        unit_fields 里的字段如果该渠道有共享授权或自有规则，就走 UnitShareService
+        的转型回执，让归一结果带上可回查的系数出处；否则沿用管线内的系数表。
+        """
         link = "flatten-cast-normalize"
         ok, flat_rows, flatten_msg = self.transform.flatten_document(path_id, documents)
         self._log(link, "nested_flatten",
@@ -331,6 +338,33 @@ class ParsePipelineOrchestrator:
         self._log(link, "unit_normalize",
                   f"{len(normalized)} rows normalized, {len(refused)} refused")
 
+        # 共享/自有规则接管的字段：按服务端资格换算并落转型回执，归一结果能说明系数出处。
+        share = service_for("unit_share")
+        share_results: list[dict[str, Any]] = []
+        if share is not None and unit_fields:
+            for field in unit_fields:
+                if not share.has_rule(channel, field, batch_id):
+                    continue
+                values = [
+                    row[field] for row in cast_ok
+                    if isinstance(row.get(field), (int, float))
+                ]
+                if not values:
+                    continue
+                result = share.cast(
+                    channel=channel, field=field, raw_value=values[0],
+                    source_unit="", batch_no=batch_id, created_at=check_time)
+                share_results.append({
+                    "field": field, "ok": result.get("ok"),
+                    "系数出处": result.get("系数出处"),
+                    "归一编号": result.get("归一编号"),
+                    "归一取值": result.get("归一取值"),
+                    "被拒值": result.get("被拒值"),
+                    "拒绝归属": result.get("拒绝归属"),
+                })
+            self._log(link, "unit_share",
+                      f"{len(share_results)} fields traced to shared/own rules")
+
         self.contract.register_rule(contract_id, batch_id, contract_columns,
                                     contract_columns, mandatory, min_rows)
         actual_columns = sorted({
@@ -338,6 +372,7 @@ class ParsePipelineOrchestrator:
         })
         passed, check = self.contract.validate(
             contract_id, actual_columns, len(normalized), check_time)
+        provenance = share.provenance(batch_id) if share is not None else None
         self._log(link, "output_contract", "passed" if passed else "blocked")
         return {"link": link, "ok": passed,
                 "flatten_msg": flatten_msg,
@@ -346,6 +381,8 @@ class ParsePipelineOrchestrator:
                 "cast_failed": len(cast_failed),
                 "normalized_rows": len(normalized),
                 "unit_refused": refused,
+                "share_results": share_results,
+                "系数出处": provenance,
                 "contract_failures": check.failures,
                 "message": ";".join(check.failures) if not passed else "契约通过"}
 

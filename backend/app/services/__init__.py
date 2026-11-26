@@ -15,6 +15,7 @@ from app.services.delimiter_rule import DelimiterRuleService
 from app.services.nested_flatten import NestedFlattenService
 from app.services.value_cast import ValueCastService
 from app.services.unit_normalize import UnitNormalizeService
+from app.services.unit_share import UnitShareService
 from app.services.output_contract import OutputContractService
 from app.services.result_deliver import ResultDeliverService
 from app.services.parse_watermark import ParseWatermarkService
@@ -39,6 +40,7 @@ SERVICES: dict[str, BaseModuleService] = {
     "nested_flatten": NestedFlattenService(),
     "value_cast": ValueCastService(),
     "unit_normalize": UnitNormalizeService(),
+    "unit_share": UnitShareService(),
     "output_contract": OutputContractService(),
     "result_deliver": ResultDeliverService(),
     "parse_watermark": ParseWatermarkService(),
